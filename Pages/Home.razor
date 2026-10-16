@@ -1,0 +1,126 @@
+﻿@page "/"
+@inject IJSRuntime JS
+@using System.Text.Json
+
+<PageTitle>일정 관리</PageTitle>
+
+<div style="max-width: 500px; margin: auto; padding: 10px; font-family: -apple-system, sans-serif;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+        <button @onclick="PrevMonth" style="padding: 8px 12px; border: none; background: #007aff; color: white; border-radius: 8px;">이전</button>
+        <h2 style="margin: 0; font-size: 1.2rem;">@currentDate.ToString("yyyy년 MM월")</h2>
+        <button @onclick="NextMonth" style="padding: 8px 12px; border: none; background: #007aff; color: white; border-radius: 8px;">다음</button>
+    </div>
+
+    <!-- 달력 그리드 -->
+    <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; text-align: center;">
+        @foreach (var day in new[] { "일", "월", "화", "수", "목", "금", "토" })
+        {
+            <div style="font-weight: bold; font-size: 0.8em; color: #8e8e93; padding-bottom: 5px;">@day</div>
+        }
+        
+        @for (int i = 0; i < firstDayOfWeek; i++) { <div></div> }
+        
+        @for (int day = 1; day <= daysInMonth; day++)
+        {
+            int currentDay = day;
+            string dateKey = $"{currentDate.Year}-{currentDate.Month:D2}-{currentDay:D2}";
+            bool isSelected = selectedDate == dateKey;
+            
+            <div style="min-height: 70px; padding: 5px; text-align: left; border-radius: 8px; background: @(isSelected ? "#e5f1ff" : "white"); box-shadow: 0 1px 3px rgba(0,0,0,0.1);" 
+                 @onclick="() => SelectDate(dateKey)">
+                <div style="font-weight: bold; font-size: 0.9em; margin-bottom: 4px;">@currentDay</div>
+                @if (events.ContainsKey(dateKey))
+                {
+                    @foreach (var evt in events[dateKey].Take(3))
+                    {
+                        <div style="background: #007aff; color: white; font-size: 0.7em; padding: 2px 4px; margin-bottom: 2px; border-radius: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                            @evt
+                        </div>
+                    }
+                    @if (events[dateKey].Count > 3)
+                    {
+                        <div style="font-size: 0.7em; color: #8e8e93;">+@(events[dateKey].Count - 3)개</div>
+                    }
+                }
+            </div>
+        }
+    </div>
+
+    <!-- 일정 관리 폼 -->
+    @if (selectedDate != null)
+    {
+        <div style="margin-top: 20px; padding: 15px; background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.15);">
+            <h3 style="margin-top: 0; font-size: 1.1rem;">@selectedDate 일정</h3>
+            
+            <div style="display: flex; gap: 8px; margin-bottom: 15px;">
+                <input @bind="newEventText" placeholder="새 일정 입력" style="flex: 1; padding: 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 1rem;" />
+                <button @onclick="AddEvent" style="padding: 10px 15px; border: none; background: #34c759; color: white; border-radius: 8px; font-weight: bold;">추가</button>
+            </div>
+            
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+            @if (events.ContainsKey(selectedDate))
+            {
+                @for (int i = 0; i < events[selectedDate].Count; i++)
+                {
+                    int index = i;
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #f2f2f7; border-radius: 8px;">
+                        <span>@events[selectedDate][index]</span>
+                        <button @onclick="() => DeleteEvent(selectedDate, index)" style="color: #ff3b30; border: none; background: none; font-weight: bold; font-size: 1.2rem;">×</button>
+                    </div>
+                }
+            }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    DateTime currentDate = DateTime.Now;
+    int firstDayOfWeek => (int)new DateTime(currentDate.Year, currentDate.Month, 1).DayOfWeek;
+    int daysInMonth => DateTime.DaysInMonth(currentDate.Year, currentDate.Month);
+    
+    Dictionary<string, List<string>> events = new();
+    string? selectedDate;
+    string newEventText = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        // 로컬 스토리지에서 데이터 불러오기 (JS Interop)
+        var json = await JS.InvokeAsync<string>("localStorage.getItem", "wasm_calendar_events");
+        if (!string.IsNullOrEmpty(json))
+        {
+            events = JsonSerializer.Deserialize<Dictionary<string, List<string>>>(json) ?? new();
+        }
+    }
+
+    async Task SaveEvents()
+    {
+        var json = JsonSerializer.Serialize(events);
+        await JS.InvokeVoidAsync("localStorage.setItem", "wasm_calendar_events", json);
+    }
+
+    void PrevMonth() { currentDate = currentDate.AddMonths(-1); selectedDate = null; }
+    void NextMonth() { currentDate = currentDate.AddMonths(1); selectedDate = null; }
+    
+    void SelectDate(string date)
+    {
+        selectedDate = date;
+        newEventText = "";
+    }
+
+    async Task AddEvent()
+    {
+        if (string.IsNullOrWhiteSpace(newEventText)) return;
+        if (!events.ContainsKey(selectedDate!)) events[selectedDate!] = new();
+        events[selectedDate!].Add(newEventText);
+        newEventText = "";
+        await SaveEvents();
+    }
+
+    async Task DeleteEvent(string date, int index)
+    {
+        events[date].RemoveAt(index);
+        if (events[date].Count == 0) events.Remove(date);
+        await SaveEvents();
+    }
+}
